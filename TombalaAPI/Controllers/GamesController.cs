@@ -15,10 +15,11 @@ namespace TombalaAPI.Controllers
         private readonly IMongoCollection<Game> _games;
         private readonly IMongoCollection<GameCard> _cards;
         private readonly IMongoCollection<User> _users;
+        private readonly IHubContext _hubContext;
         private static List<int> availableNumbers = Enumerable.Range(1, 90).ToList();
         private static Random random = new Random();
 
-        public GamesController(IOptions<DatabaseSettings> options)
+        public GamesController(IOptions<DatabaseSettings> options, IHubContext hubContext)
         {
             var mongoClient = new MongoClient(
             options.Value.ConnectionString);
@@ -33,6 +34,8 @@ namespace TombalaAPI.Controllers
 
             _users = mongoDatabase.GetCollection<User>(
             options.Value.UsersCollectionName);
+
+            _hubContext = hubContext;
         }
 
         [HttpPost("create")]
@@ -45,6 +48,8 @@ namespace TombalaAPI.Controllers
                 Active = false
             };
             _games.InsertOne(game);
+
+            await _hubContext.Clients.All.SendAsync("NewGame");
 
             return Ok(game);
         }
@@ -60,6 +65,8 @@ namespace TombalaAPI.Controllers
             game.Active = status == "start";
 
             await _games.ReplaceOneAsync(g => g.Id == id, game);
+
+            await _hubContext.Clients.All.SendAsync("GameStatusChanged");
 
             return Ok(game);
         }
@@ -78,6 +85,8 @@ namespace TombalaAPI.Controllers
             availableNumbers.RemoveAt(randomIndex);
 
             await _games.UpdateOneAsync(g => g.Id == id, Builders<Game>.Update.Push(g => g.DrawnNumbers, drawnNumber));
+
+            await _hubContext.Clients.All.SendAsync("NewDraw", drawnNumber);
 
             return Ok(drawnNumber);
         }
@@ -99,6 +108,8 @@ namespace TombalaAPI.Controllers
             await _games.UpdateOneAsync(x => x.Id == gameId && x.GameCards.Any(card => card.Id == cardId), Builders<Game>.Update.AddToSet("GameCards.$.MarkedNumbers", number));
             await _cards.UpdateOneAsync(x => x.Id == cardId, Builders<GameCard>.Update.Push(g => g.MarkedNumbers, number));
 
+            await _hubContext.Clients.All.SendAsync("NewUserAction");
+
             return Ok();
         }
 
@@ -109,6 +120,8 @@ namespace TombalaAPI.Controllers
             var card = new GameCard { Id = cardId, GameId = gameId, User = user };
 
             await _games.UpdateOneAsync(x => x.Id == gameId && x.GameCards.Any(card => card.Id == cardId), Builders<Game>.Update.Set("GameCards.$", card));
+
+            await _hubContext.Clients.All.SendAsync("NewCard");
 
             return Ok();
         }
@@ -140,6 +153,8 @@ namespace TombalaAPI.Controllers
 
             var card = new GameCard { Id = Guid.NewGuid().ToString(), GameId = id, User = user };
             await _games.UpdateOneAsync(x => x.Id == id, Builders<Game>.Update.Push(g => g.GameCards, card));
+
+            await _hubContext.Clients.All.SendAsync("NewParticipant", id);
 
             return Ok(game);
         }
