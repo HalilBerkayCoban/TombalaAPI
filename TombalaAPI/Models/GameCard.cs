@@ -1,30 +1,33 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TombalaAPI.Models
 {
     public class GameCard
     {
-        [BsonId]
+        [Key]
         public string Id { get; set; }
 
         public string GameId { get; set; }
 
         public User User { get; set; }
+        
+        public string UserId { get; set; }
 
         public List<int> Numbers { get; set; }
 
         public List<int> MarkedNumbers { get; set; }
 
-        [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
         public DateTime CreatedAt { get; set; }
 
-        [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
         public DateTime UpdatedAt { get; set; }
 
         public GameCard()
         {
             Numbers = new List<int>();
             MarkedNumbers = new List<int>();
+            CreatedAt = DateTime.UtcNow;
+            UpdatedAt = DateTime.UtcNow;
             GenerateNumbers();
         }
 
@@ -43,8 +46,9 @@ namespace TombalaAPI.Models
             for (int i = 0; i < 15; i++)
             {
                 var randomIndex = random.Next(allNumbers.Count);
-                Numbers.Add(randomIndex);
-                allNumbers.Remove(randomIndex);
+                var number = allNumbers[randomIndex];
+                Numbers.Add(number);
+                allNumbers.RemoveAt(randomIndex);
             }
         }
     }

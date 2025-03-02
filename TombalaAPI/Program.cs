@@ -1,21 +1,28 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text.Json;
+using TombalaAPI.Hubs;
 using TombalaAPI.Models;
+using DotNetEnv;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-
+Env.Load(); 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
 
-builder.Services.Configure<DatabaseSettings>(
-    builder.Configuration.GetSection("TombalaDatabase"));
+builder.Configuration.AddEnvironmentVariables();
+
+// Configure PostgreSQL with EF Core
+var connectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING");
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(connectionString));
 
 builder.Services.AddAuthentication("cookie").AddCookie("cookie").AddOAuth("Discord", options =>
 {
@@ -53,6 +60,21 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Apply migrations at startup
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        dbContext.Database.Migrate();
+    }
+}
+catch (Exception ex)
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    logger.LogError(ex, "An error occurred while migrating the database.");
+}
+
 app.UseAuthentication();
 app.UseHttpsRedirection();
 
@@ -67,5 +89,6 @@ app.MapGet("/login", () =>
 });
 
 app.MapControllers();
+app.MapHub<GameHub>("/gamehub");
 
 app.Run();

@@ -1,5 +1,5 @@
 # TombalaAPI
-This project is a implementation of the Turkish traditional game Tombala with .Net Core API and MongoDb.
+This project is an implementation of the Turkish traditional game Tombala with .Net Core API and PostgreSQL.
 
 # Installation
 
@@ -12,11 +12,23 @@ $ dotnet watch
 ```
 This will open a new browser tab, you will be greeted with the SwaggerUI.
 
-Before you start using the project, there are some configuration settings you need to modify in the appSettings.json file.
+Before you start using the project, there are some configuration settings you need to modify.
 
 ## Configuration
 
-In the `appSettings.json` file, you will find the following sections that require your attention:
+### Environment Variables
+
+Create a `.env` file in the root directory of the project with the following content:
+
+```
+CONNECTION_STRING=Host=localhost;Database=tombala;Username=postgres;Password=postgres
+```
+
+Replace the connection string with your PostgreSQL server details.
+
+### Discord Authentication
+
+In the `appSettings.json` file, you will find the following section that requires your attention:
 
 ```
 "Discord": {
@@ -27,22 +39,6 @@ In the `appSettings.json` file, you will find the following sections that requir
 
 To integrate Discord authentication into the project, you need to provide your Discord client ID and client secret.
 Replace `"YOUR-CLIENT-ID"` with your actual Discord client ID, and `"YOUR-CLIENT-SECRET"` with your Discord client secret.
-
-### Tombala Database Configuration
-
-```
-"TombalaDatabase": {
-"ConnectionString": "mongodb://localhost:27017",
-"DatabaseName": "tombala",
-"GamesCollectionName": "game",
-"UsersCollectionName": "user"
-}
-```
-
-The Tombala game requires a MongoDB database for data storage. 
-In this section, you need to update the connection string and other details related to the database. 
-Replace `"mongodb://localhost:27017"` with the connection string for your MongoDB server. 
-Also, you can modify the `"DatabaseName"`, `"GamesCollectionName"`, and `"UsersCollectionName"` values according to your preferences.
 
 ### Program.cs Configuration
 

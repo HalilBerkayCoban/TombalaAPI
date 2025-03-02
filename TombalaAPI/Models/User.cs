@@ -1,36 +1,29 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
-using MongoDB.Driver;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TombalaAPI.Models
 {
     public class User
     {
-        [BsonId]
+        [Key]
         public string Id { get; set; }
 
+        [Required]
         public string Name { get; set; }
 
-        [BsonElement("discordId")]
+        [Column("discord_id")]
         public string DiscordId { get; set; }
 
         public bool IsAdmin { get; set; }
 
-        [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
         public DateTime CreatedAt { get; set; }
 
-        [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
         public DateTime UpdatedAt { get; set; }
 
-        public static void CreateIndexes(IMongoCollection<User> collection)
+        public User()
         {
-            var indexKeysDefinition = Builders<User>.IndexKeys.Combine(
-                Builders<User>.IndexKeys.Ascending(u => u.Name),
-                Builders<User>.IndexKeys.Ascending(u => u.DiscordId)
-            );
-
-            var indexModel = new CreateIndexModel<User>(indexKeysDefinition, new CreateIndexOptions { Unique = true });
-
-            collection.Indexes.CreateOne(indexModel);
+            CreatedAt = DateTime.UtcNow;
+            UpdatedAt = DateTime.UtcNow;
         }
     }
 }

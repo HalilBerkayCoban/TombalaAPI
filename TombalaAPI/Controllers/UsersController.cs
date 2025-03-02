@@ -1,7 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
+using Microsoft.EntityFrameworkCore;
 using TombalaAPI.Models;
 
 namespace TombalaAPI.Controllers
@@ -10,21 +9,16 @@ namespace TombalaAPI.Controllers
     [ApiController]
     public class UsersController : ControllerBase
     {
-        private readonly IMongoCollection<User> _users;
+        private readonly ApplicationDbContext _context;
 
-        public UsersController(IOptions<DatabaseSettings> options)
+        public UsersController(ApplicationDbContext context)
         {
-            var mongoClient = new MongoClient(options.Value.ConnectionString);
-            var mongoDatabase = mongoClient.GetDatabase(
-            options.Value.DatabaseName);
-
-            _users = mongoDatabase.GetCollection<User>(
-            options.Value.UsersCollectionName);
+            _context = context;
         }
 
         [Authorize(AuthenticationSchemes = "Discord")]
         [HttpGet("me")]
-        public IActionResult GetMe()
+        public async Task<IActionResult> GetMe()
         {
             if (!HttpContext.User.Identity.IsAuthenticated)
             {
@@ -32,7 +26,7 @@ namespace TombalaAPI.Controllers
             }
             var claims = HttpContext.User.Claims.Select(c => new { c.Type, c.Value }).ToList();
 
-            var user = _users.Find(u => u.DiscordId == claims[0].Value).FirstOrDefault();
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.DiscordId == claims[0].Value);
 
             if (user == null)
             {
@@ -44,7 +38,8 @@ namespace TombalaAPI.Controllers
                     IsAdmin = false,
                 };
 
-                _users.InsertOne(newUser);
+                _context.Users.Add(newUser);
+                await _context.SaveChangesAsync();
             }
 
             return Ok(claims);

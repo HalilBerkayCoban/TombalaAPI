@@ -1,9 +1,9 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
+using Microsoft.EntityFrameworkCore;
 using System;
+using TombalaAPI.Hubs;
 using TombalaAPI.Models;
 
 namespace TombalaAPI.Controllers
@@ -12,29 +12,14 @@ namespace TombalaAPI.Controllers
     [ApiController]
     public class GamesController : ControllerBase
     {
-        private readonly IMongoCollection<Game> _games;
-        private readonly IMongoCollection<GameCard> _cards;
-        private readonly IMongoCollection<User> _users;
-        private readonly IHubContext _hubContext;
+        private readonly ApplicationDbContext _context;
+        private readonly IHubContext<GameHub> _hubContext;
         private static List<int> availableNumbers = Enumerable.Range(1, 90).ToList();
         private static Random random = new Random();
 
-        public GamesController(IOptions<DatabaseSettings> options, IHubContext hubContext)
+        public GamesController(ApplicationDbContext context, IHubContext<GameHub> hubContext)
         {
-            var mongoClient = new MongoClient(
-            options.Value.ConnectionString);
-            var mongoDatabase = mongoClient.GetDatabase(
-            options.Value.DatabaseName);
-
-            _games = mongoDatabase.GetCollection<Game>(
-            options.Value.GamesCollectionName);
-
-            _cards = mongoDatabase.GetCollection<GameCard>(
-            options.Value.GameCardsCollectionName);
-
-            _users = mongoDatabase.GetCollection<User>(
-            options.Value.UsersCollectionName);
-
+            _context = context;
             _hubContext = hubContext;
         }
 
@@ -47,7 +32,9 @@ namespace TombalaAPI.Controllers
                 Name = name,
                 Active = false
             };
-            _games.InsertOne(game);
+            
+            _context.Games.Add(game);
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("NewGame");
 
@@ -57,14 +44,15 @@ namespace TombalaAPI.Controllers
         [HttpPost("{id}/status")]
         public async Task<ActionResult<Game>> ChangeGameStatus(string id, [FromQuery] string status)
         {
-            var game = _games.Find(g => g.Id == id).FirstOrDefault();
+            var game = await _context.Games.FindAsync(id);
 
             if (game == null)
                 return NotFound();
 
             game.Active = status == "start";
+            game.UpdatedAt = DateTime.UtcNow;
 
-            await _games.ReplaceOneAsync(g => g.Id == id, game);
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("GameStatusChanged");
 
@@ -74,7 +62,7 @@ namespace TombalaAPI.Controllers
         [HttpPost("{id}/numbers")]
         public async Task<ActionResult<int>> DrawNumber(string id)
         {
-            var game = _games.Find(g => g.Id == id).FirstOrDefault();
+            var game = await _context.Games.FindAsync(id);
 
             if (game == null)
                 return NotFound();
@@ -84,7 +72,10 @@ namespace TombalaAPI.Controllers
 
             availableNumbers.RemoveAt(randomIndex);
 
-            await _games.UpdateOneAsync(g => g.Id == id, Builders<Game>.Update.Push(g => g.DrawnNumbers, drawnNumber));
+            game.DrawnNumbers.Add(drawnNumber);
+            game.UpdatedAt = DateTime.UtcNow;
+            
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("NewDraw", drawnNumber);
 
@@ -97,7 +88,9 @@ namespace TombalaAPI.Controllers
             if (mark != true)
                 return BadRequest();
 
-            var game = _games.Find(g => g.Id == gameId).FirstOrDefault();
+            var game = await _context.Games
+                .Include(g => g.DrawnNumbers)
+                .FirstOrDefaultAsync(g => g.Id == gameId);
 
             if (game == null)
                 return NotFound();
@@ -105,8 +98,14 @@ namespace TombalaAPI.Controllers
             if (game.DrawnNumbers[game.DrawnNumbers.Count - 1] != number)
                 return BadRequest();
 
-            await _games.UpdateOneAsync(x => x.Id == gameId && x.GameCards.Any(card => card.Id == cardId), Builders<Game>.Update.AddToSet("GameCards.$.MarkedNumbers", number));
-            await _cards.UpdateOneAsync(x => x.Id == cardId, Builders<GameCard>.Update.Push(g => g.MarkedNumbers, number));
+            var card = await _context.GameCards.FindAsync(cardId);
+            if (card == null)
+                return NotFound();
+
+            card.MarkedNumbers.Add(number);
+            card.UpdatedAt = DateTime.UtcNow;
+            
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("NewUserAction");
 
@@ -116,10 +115,34 @@ namespace TombalaAPI.Controllers
         [HttpPut("{gameId}/cards/{cardId}")]
         public async Task<ActionResult> RequestANewCard(string gameId, string cardId, [FromQuery] string username)
         {
-            var user = _users.Find(x => x.Name == username).FirstOrDefault();
-            var card = new GameCard { Id = cardId, GameId = gameId, User = user };
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Name == username);
+            if (user == null)
+                return NotFound("User not found");
 
-            await _games.UpdateOneAsync(x => x.Id == gameId && x.GameCards.Any(card => card.Id == cardId), Builders<Game>.Update.Set("GameCards.$", card));
+            var game = await _context.Games.FindAsync(gameId);
+            if (game == null)
+                return NotFound("Game not found");
+
+            var card = await _context.GameCards.FindAsync(cardId);
+            if (card == null)
+            {
+                card = new GameCard 
+                { 
+                    Id = cardId, 
+                    GameId = gameId, 
+                    User = user,
+                    UserId = user.Id
+                };
+                _context.GameCards.Add(card);
+            }
+            else
+            {
+                card.User = user;
+                card.UserId = user.Id;
+                card.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("NewCard");
 
@@ -127,32 +150,43 @@ namespace TombalaAPI.Controllers
         }
 
         [HttpGet("games")]
-        public ActionResult<List<Game>> GetAllGames()
+        public async Task<ActionResult<List<Game>>> GetAllGames()
         {
-            var games = _games.Find(_ => true).ToList();
-            var user = _users.Find(u => u.IsAdmin == true).FirstOrDefault();
+            var adminUser = await _context.Users.FirstOrDefaultAsync(u => u.IsAdmin == true);
 
-            if (user == null)
-                games = _games.Find(g => g.Active == true).ToList();
-
-            return Ok(games);
+            if (adminUser == null)
+                return Ok(await _context.Games.Where(g => g.Active == true).ToListAsync());
+            
+            return Ok(await _context.Games.ToListAsync());
         }
-
 
         [HttpPost("{id}/participants")]
         public async Task<IActionResult> AddParticipant(string id, [FromQuery] string username)
         {
-            var game = await _games.Find(g => g.Id == id).FirstOrDefaultAsync();
+            var game = await _context.Games
+                .Include(g => g.Participants)
+                .FirstOrDefaultAsync(g => g.Id == id);
 
             if (game == null)
                 return NotFound();
 
-            var user = _users.Find(x => x.Name == username).FirstOrDefault();
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Name == username);
+            if (user == null)
+                return NotFound("User not found");
 
-            await _games.UpdateOneAsync(g => g.Id == id, Builders<Game>.Update.Push(g => g.Participants, user));
+            game.Participants.Add(user);
+            game.UpdatedAt = DateTime.UtcNow;
 
-            var card = new GameCard { Id = Guid.NewGuid().ToString(), GameId = id, User = user };
-            await _games.UpdateOneAsync(x => x.Id == id, Builders<Game>.Update.Push(g => g.GameCards, card));
+            var card = new GameCard 
+            { 
+                Id = Guid.NewGuid().ToString(), 
+                GameId = id, 
+                User = user,
+                UserId = user.Id
+            };
+            
+            _context.GameCards.Add(card);
+            await _context.SaveChangesAsync();
 
             await _hubContext.Clients.All.SendAsync("NewParticipant", id);
 
